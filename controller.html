@@ -296,16 +296,13 @@
           { label: "1 min", value: 60 },
           { label: "5 min", value: 300 },
           { label: "10 min", value: 600 },
-          { label: "30 min", value: 1800 },
-          { label: "1 hour", value: 3600 },
-          { label: "2 hours", value: 7200 },
           { label: "Custom", value: "custom" },
         ],
         refresh_interval: 5,
         session_refresh_buffer: 30,
         storage_key: "piholeSession",
         custom_duration_key: "piholeCustomDuration",
-        controller_version: "1.0",
+        controller_version: "1.1",
         github_url: "https://github.com/mikeswanson/PiHoleController",
       };
 
@@ -324,6 +321,14 @@
         csrf: null,
       };
 
+      // Helper function to parse boolean parameters strictly
+      // Only accepts string values "true" or "false" - anything else returns the default
+      function parseStrictBoolean(value, defaultValue) {
+        if (value === "true") return true;
+        if (value === "false") return false;
+        return defaultValue;
+      }
+
       // Parse URL parameters
       const urlParams = new URLSearchParams(window.location.search);
       const piholeUrl = urlParams.get("url") || "https://pi.hole";
@@ -332,6 +337,52 @@
       const duration = urlParams.get("duration")
         ? parseInt(urlParams.get("duration"))
         : null;
+      const showEnableDisable = parseStrictBoolean(
+        urlParams.get("showButtons"),
+        true
+      );
+      const customTitle = urlParams.get("title") || "Pi-hole Controller";
+      const showTips = parseStrictBoolean(urlParams.get("showTips"), true);
+      const showFooter = parseStrictBoolean(urlParams.get("showFooter"), true);
+      const customPresets = urlParams.get("presets"); // Custom comma-separated preset times
+
+      // Process custom presets if provided
+      if (customPresets) {
+        try {
+          const presetItems = customPresets.split(",");
+          const customPresetArray = [];
+
+          presetItems.forEach((item) => {
+            // Parse the preset (format: "label:value")
+            const parts = item.split(":");
+            if (parts.length === 2) {
+              const label = decodeURIComponent(parts[0].trim());
+              const value = parts[1].trim().toLowerCase();
+
+              if (value === "custom") {
+                customPresetArray.push({ label, value: "custom" });
+              } else {
+                // Try to parse as number, converting from minutes if needed
+                let numValue = parseInt(value);
+                if (!isNaN(numValue)) {
+                  // Check if value ends with "m" for minutes
+                  if (value.endsWith("m")) {
+                    numValue *= 60; // Convert to seconds
+                  }
+                  customPresetArray.push({ label, value: numValue });
+                }
+              }
+            }
+          });
+
+          // Replace default presets if we have valid custom ones
+          if (customPresetArray.length > 0) {
+            CONFIG.preset_durations = customPresetArray;
+          }
+        } catch (e) {
+          console.error("Error parsing custom presets:", e);
+        }
+      }
 
       // ====================================================
       // DOM ELEMENTS
@@ -449,15 +500,40 @@
         return timeString;
       }
 
+      // Helper function to handle parameters consistently
+      function buildUrlParams(baseParams = {}) {
+        const params = new URLSearchParams();
+
+        // 1. Always put URL and password first (if provided)
+        if (baseParams.url) params.set("url", baseParams.url);
+        if (baseParams.pwd) params.set("pwd", baseParams.pwd);
+
+        // 2. Preserve customization parameters in the middle
+        if (!showEnableDisable) params.set("showButtons", "false");
+        if (!showTips) params.set("showTips", "false");
+        if (!showFooter) params.set("showFooter", "false");
+        if (customPresets) params.set("presets", customPresets);
+        if (customTitle !== "Pi-hole Controller")
+          params.set("title", customTitle);
+
+        // 3. Add action-specific parameters last (if provided)
+        if (baseParams.action) params.set("action", baseParams.action);
+        if (baseParams.duration !== undefined && baseParams.duration !== null) {
+          params.set("duration", baseParams.duration);
+        }
+
+        return params;
+      }
+
       function generateActionUrl(action, duration = null) {
         const url = new URL(window.location.href);
-        const params = new URLSearchParams();
-        params.set("url", piholeUrl);
-        params.set("pwd", apiPassword);
-        params.set("action", action);
-        if (duration !== null) {
-          params.set("duration", duration);
-        }
+        const params = buildUrlParams({
+          url: piholeUrl,
+          pwd: apiPassword,
+          action: action,
+          duration: duration,
+        });
+
         url.search = params.toString();
         return url.toString();
       }
@@ -831,10 +907,44 @@
       // INITIALIZATION
       // ====================================================
       async function initialize() {
+        // Set custom title if provided
+        document.title = customTitle;
+
+        // Update headings in both cards
+        const titleElements = document.querySelectorAll("h1");
+        titleElements.forEach((el) => {
+          el.textContent = customTitle;
+        });
+
+        // Show/hide tips
+        if (!showTips) {
+          const tipElements = document.querySelectorAll(".help-text");
+          tipElements.forEach((el) => (el.style.display = "none"));
+        }
+
+        // Show/hide footer
+        if (!showFooter) {
+          const footer = document.querySelector(".footer");
+          if (footer) footer.style.display = "none";
+        }
+
         if (apiPassword) {
           elements.loginCard.classList.add("hidden");
           elements.mainCard.classList.remove("hidden");
+
+          // Apply UI customization options
+          if (
+            !showEnableDisable &&
+            elements.enableButton &&
+            elements.disableButton
+          ) {
+            const buttonRow = elements.enableButton.closest(".button-row");
+            if (buttonRow) buttonRow.style.display = "none";
+          }
+
+          // Setup preset buttons
           setupPresetButtons();
+
           updateAdminLink();
           await authenticateSession();
           await checkBlockingStatus();
@@ -876,11 +986,14 @@
         e.preventDefault();
         const enteredUrl = elements.piholeUrlInput.value.trim();
         const enteredPassword = elements.passwordInput.value;
+
         const redirectUrl = new URL(window.location.href);
-        redirectUrl.search = new URLSearchParams({
+        const params = buildUrlParams({
           url: enteredUrl,
           pwd: enteredPassword,
-        }).toString();
+        });
+
+        redirectUrl.search = params.toString();
         window.location.href = redirectUrl.toString();
       });
 
