@@ -77,7 +77,7 @@ Now, you can access the controller by navigating to `https://pi.hole/controller.
    Open your browser and navigate to your Pi-hole controller URL (e.g., `https://pi.hole/controller.html`).
 
 2. **Log In:**
-   Enter your Pi-hole URL and the generated app password to log in.
+   Enter your Pi-hole URL and the generated app password to log in. After logging in, you can bookmark the URL to avoid entering the password each time.
 
 3. **Toggle Blocking:**
 
