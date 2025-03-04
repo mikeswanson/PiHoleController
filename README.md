@@ -39,7 +39,7 @@ curl -o controller.html https://raw.githubusercontent.com/mikeswanson/PiHoleCont
 
 ## Installing on Your Pi-hole
 
-Follow these steps to install the controller on your Pi-hole:
+Follow these steps to install or update the controller on your Pi-hole:
 
 1. Transfer the `controller.html` file to your Pi-hole:
 
@@ -86,3 +86,37 @@ Now, you can access the controller by navigating to `https://pi.hole/controller.
 
 4. **Create Shortcuts:**
    After clicking an action, copy the URL from your browser to bookmark it as a shortcut for that specific action.
+
+## Customization
+
+For family-friendly setups or specialized use cases, you can customize the controller interface using URL parameters:
+
+### Parameters
+
+- **title=Custom+Title**: Sets a custom title for the page (default is "Pi-hole Controller")
+- **showButtons=false**: Hides the main Enable/Disable blocking buttons
+- **showTips=false**: Hides tips throughout the interface (like password generation instructions and bookmark hints)
+- **showFooter=false**: Hides the footer with version info and admin links
+- **presets=item1,item2,...**: Define custom preset durations
+
+### Custom Presets Format
+
+Custom presets use the format `Label:Value` separated by commas:
+
+- `Label` is the text shown on the button (use '+' for spaces)
+- `Value` is the duration in seconds, or append `m` for minutes, or use `custom`
+
+Examples:
+
+- `presets=Quick:30,5+Minutes:300,Hour:3600`
+- `presets=Quick:30,Lunch:45m,Custom:custom`
+
+### Example URL
+
+Simple URL with minimal interface for family use (fill-in `your-password`):
+
+```bash
+https://pi.hole/controller.html?url=https://pi.hole&pwd=your-password&title=Internet+Controls&showButtons=false&showTips=false&showFooter=false&presets=10+seconds:10,30+seconds:30,1+minute:1m
+```
+
+![Screenshot of Customized Pi-hole Controller](images/customized.png)
