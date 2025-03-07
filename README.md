@@ -63,6 +63,8 @@ Follow these steps to install or update the controller on your Pi-hole:
    sudo mv ~/controller.html /var/www/html
    ```
 
+   _If you try to access the controller by its URL and see a permission denied message, run this command to enable additional read permissions: `sudo chmod 644 /var/www/html/controller.html`_
+
 4. Exit the SSH session:
 
    ```bash
