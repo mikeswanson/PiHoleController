@@ -302,7 +302,7 @@
         session_refresh_buffer: 30,
         storage_key: "piholeSession",
         custom_duration_key: "piholeCustomDuration",
-        controller_version: "1.1",
+        controller_version: "1.2",
         github_url: "https://github.com/mikeswanson/PiHoleController",
       };
 
@@ -337,11 +337,15 @@
       const duration = urlParams.get("duration")
         ? parseInt(urlParams.get("duration"))
         : null;
+      const customTitle = urlParams.get("title") || "Pi-hole Controller";
       const showEnableDisable = parseStrictBoolean(
         urlParams.get("showButtons"),
         true
       );
-      const customTitle = urlParams.get("title") || "Pi-hole Controller";
+      const showPresets = parseStrictBoolean(
+        urlParams.get("showPresets"),
+        true
+      );
       const showTips = parseStrictBoolean(urlParams.get("showTips"), true);
       const showFooter = parseStrictBoolean(urlParams.get("showFooter"), true);
       const customPresets = urlParams.get("presets"); // Custom comma-separated preset times
@@ -509,12 +513,13 @@
         if (baseParams.pwd) params.set("pwd", baseParams.pwd);
 
         // 2. Preserve customization parameters in the middle
+        if (customTitle !== "Pi-hole Controller")
+          params.set("title", customTitle);
         if (!showEnableDisable) params.set("showButtons", "false");
+        if (!showPresets) params.set("showPresets", "false");
         if (!showTips) params.set("showTips", "false");
         if (!showFooter) params.set("showFooter", "false");
         if (customPresets) params.set("presets", customPresets);
-        if (customTitle !== "Pi-hole Controller")
-          params.set("title", customTitle);
 
         // 3. Add action-specific parameters last (if provided)
         if (baseParams.action) params.set("action", baseParams.action);
@@ -940,6 +945,14 @@
           ) {
             const buttonRow = elements.enableButton.closest(".button-row");
             if (buttonRow) buttonRow.style.display = "none";
+          }
+
+          // Show/hide preset buttons
+          if (!showPresets) {
+            if (elements.presetContainer)
+              elements.presetContainer.style.display = "none";
+            if (elements.customDurationDiv)
+              elements.customDurationDiv.style.display = "none";
           }
 
           // Setup preset buttons

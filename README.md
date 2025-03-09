@@ -97,9 +97,10 @@ For family-friendly setups or specialized use cases, you can customize the contr
 
 - **title=Custom+Title**: Sets a custom title for the page (default is "Pi-hole Controller")
 - **showButtons=false**: Hides the main Enable/Disable blocking buttons
+- **showPresets=false**: Hides all preset buttons and the custom duration option
 - **showTips=false**: Hides tips throughout the interface (like password generation instructions and bookmark hints)
 - **showFooter=false**: Hides the footer with version info and admin links
-- **presets=item1,item2,...**: Define custom preset durations
+- **presets=item1,item2,...**: Define custom preset durations (won't be shown if `showPresets` is set to `false`)
 
 ### Custom Presets Format
 
