@@ -71,6 +71,8 @@ Follow these steps to install or update the controller on your Pi-hole:
    exit
    ```
 
+5. From the Pi-hole Admin Interface, navigate to **Settings → All settings → Webserver and API → webserver.serve_all** and set it to **Enabled**.
+
 Now, you can access the controller by navigating to `https://pi.hole/controller.html` (or the appropriate hostname/IP) in your web browser.
 
 ## Usage
