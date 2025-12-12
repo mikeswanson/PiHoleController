@@ -302,7 +302,8 @@
         session_refresh_buffer: 30,
         storage_key: "piholeSession",
         custom_duration_key: "piholeCustomDuration",
-        controller_version: "1.2",
+        controller_version: "1.2.1",
+        fetch_timeout_ms: 10000,
         github_url: "https://github.com/mikeswanson/PiHoleController",
       };
 
@@ -562,6 +563,24 @@
       // ====================================================
       // API INTERACTION
       // ====================================================
+      // Helper: fetch with timeout to avoid indefinite hangs
+      async function fetchWithTimeout(url, options = {}, timeoutMs = CONFIG.fetch_timeout_ms) {
+        const controller = new AbortController();
+        const id = setTimeout(() => {
+          try { controller.abort(); } catch (_) {}
+        }, timeoutMs);
+        try {
+          const opts = { ...options, signal: controller.signal };
+          return await fetch(url, opts);
+        } finally {
+          clearTimeout(id);
+        }
+      }
+      
+      // Helper: treat both 401 and 403 as unauthorized for session purposes
+      function isUnauthorized(response) {
+        return response && (response.status === 401 || response.status === 403);
+      }
       // Helper: Returns true if the controller is hosted on the same origin as the Pi-hole URL
       function isSameOrigin() {
         try {
@@ -575,11 +594,10 @@
       function getFetchOptions(method, body = null) {
         const options = {
           method,
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: {},
         };
         if (body) {
+          options.headers["Content-Type"] = "application/json";
           options.body = JSON.stringify(body);
         }
         if (isSameOrigin()) {
@@ -595,7 +613,7 @@
         try {
           showStatus("Creating new Pi-hole session...", "info");
           const options = getFetchOptions("POST", { password: apiPassword });
-          const response = await fetch(`${piholeUrl}/api/auth`, options);
+          const response = await fetchWithTimeout(`${piholeUrl}/api/auth`, options);
           const data = await response.json();
           if (response.ok && data.session?.valid) {
             state.sid = data.session.sid;
@@ -621,10 +639,11 @@
           }
         } catch (error) {
           state.sid = null;
-          showStatus(
-            `Connection error: ${error.message}. Check your Pi-hole URL.`,
-            "error"
-          );
+          const isAbort = error && error.name === "AbortError";
+          const msg = isAbort
+            ? "Request timed out. Check connectivity."
+            : `Connection error: ${error.message}. Check your Pi-hole URL.`;
+          showStatus(msg, "error");
           return false;
         }
       }
@@ -638,7 +657,7 @@
         if (state.sid) {
           try {
             const options = getFetchOptions("GET");
-            const response = await fetch(
+            const response = await fetchWithTimeout(
               `${piholeUrl}/api/dns/blocking?sid=${encodeURIComponent(
                 state.sid
               )}`,
@@ -646,13 +665,23 @@
             );
             if (response.ok) {
               return true;
-            } else if (response.status === 401) {
-              console.log("Session expired or invalid");
-              state.sid = null;
-              clearSessionData();
+            } else {
+              if (isUnauthorized(response)) {
+                console.log("Session expired or invalid (auth check)");
+                state.sid = null;
+                clearSessionData();
+              } else {
+                console.warn("Non-OK during auth check:", response.status);
+                // Clear session on other non-OK statuses to recover from stale SIDs
+                state.sid = null;
+                clearSessionData();
+              }
             }
           } catch (error) {
             console.error("Error verifying session:", error);
+            // Clear stale session on network errors/timeouts
+            state.sid = null;
+            clearSessionData();
           }
         }
         // If we don't have a valid session, create a new one
@@ -669,7 +698,7 @@
         }
         try {
           const options = getFetchOptions("DELETE");
-          const response = await fetch(
+          const response = await fetchWithTimeout(
             `${piholeUrl}/api/auth?sid=${encodeURIComponent(state.sid)}`,
             options
           );
@@ -700,13 +729,13 @@
         }
         try {
           const options = getFetchOptions("GET");
-          const response = await fetch(
+          const response = await fetchWithTimeout(
             `${piholeUrl}/api/dns/blocking?sid=${encodeURIComponent(
               state.sid
             )}`,
             options
           );
-          if (response.status === 401) {
+          if (isUnauthorized(response)) {
             console.log("Session expired during status check");
             state.sid = null;
             clearSessionData();
@@ -773,13 +802,13 @@
             payload.timer = duration;
           }
           const options = getFetchOptions("POST", payload);
-          const response = await fetch(
+          const response = await fetchWithTimeout(
             `${piholeUrl}/api/dns/blocking?sid=${encodeURIComponent(
               state.sid
             )}`,
             options
           );
-          if (response.status === 401) {
+          if (isUnauthorized(response)) {
             console.log("Session expired during action execution");
             state.sid = null;
             clearSessionData();
