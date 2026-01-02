@@ -1,6 +1,6 @@
 # Pi-hole Controller
 
-A lightweight, single-HTML-file controller for Pi-hole 6 that lets you easily enable or disable blocking. This controller works by communicating with the Pi-hole API using an app password and supports temporary disabling with a countdown timer.
+A lightweight, two-file (HTML + JavaScript) controller for Pi-hole 6 that lets you easily enable or disable blocking. This controller works by communicating with the Pi-hole API using an app password and supports temporary disabling with a countdown timer.
 
 ![Screenshot of Pi-hole Controller](images/controller.png)
 
@@ -29,22 +29,23 @@ The Pi-hole Controller provides a simple web interface for:
 
 ## Downloading the Controller
 
-You can download the single HTML file directly from GitHub without needing Git installed. Curl is installed by default on Windows 10/11, macOS, and most Linux distributions.
+You can download the HTML and JavaScript files directly from GitHub without needing Git installed. Curl is installed by default on Windows 10/11, macOS, and most Linux distributions.
 
 ### Using curl (all platforms)
 
 ```bash
 curl -o controller.html https://raw.githubusercontent.com/mikeswanson/PiHoleController/main/controller.html
+curl -o controller.js https://raw.githubusercontent.com/mikeswanson/PiHoleController/main/controller.js
 ```
 
 ## Installing on Your Pi-hole
 
 Follow these steps to install or update the controller on your Pi-hole:
 
-1. Transfer the `controller.html` file to your Pi-hole:
+1. Transfer the files to your Pi-hole:
 
    ```bash
-   scp controller.html pi@pi.hole:~
+   scp controller.html controller.js pi@pi.hole:~
    ```
 
    _(Enter the Pi-hole password when prompted)_
@@ -57,13 +58,15 @@ Follow these steps to install or update the controller on your Pi-hole:
 
    _(Enter the Pi-hole password when prompted)_
 
-3. Move the file to the web server directory:
+3. Move the files to the web server directory:
 
    ```bash
-   sudo mv ~/controller.html /var/www/html
+   sudo mv ~/controller.html ~/controller.js /var/www/html
    ```
 
-   _If you try to access the controller by its URL and see a permission denied message, run this command to enable additional read permissions: `sudo chmod 644 /var/www/html/controller.html`_
+   _If you try to access the controller by its URL and see a permission denied message, run this command to enable additional read permissions: `sudo chmod 644 /var/www/html/controller.html /var/www/html/controller.js`_
+
+   _Keep `controller.html` and `controller.js` in the same directory._
 
 4. Exit the SSH session:
 
@@ -74,6 +77,8 @@ Follow these steps to install or update the controller on your Pi-hole:
 5. From the Pi-hole Admin Interface, navigate to **Settings → All settings → Webserver and API → webserver.serve_all** and set it to **Enabled**.
 
 Now, you can access the controller by navigating to `https://pi.hole/controller.html` (or the appropriate hostname/IP) in your web browser.
+
+> **CSP Note:** Pi-hole 6 tightened Content Security Policy defaults to block inline scripts. This project uses an external JavaScript file so it works with the default Pi-hole CSP without asking users to change server settings.
 
 ## Usage
 

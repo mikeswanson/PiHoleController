@@ -1,0 +1,810 @@
+﻿// ====================================================
+// CONFIGURATION
+// ====================================================
+const CONFIG = {
+  preset_durations: [
+    { label: "10 sec", value: 10 },
+    { label: "30 sec", value: 30 },
+    { label: "1 min", value: 60 },
+    { label: "5 min", value: 300 },
+    { label: "10 min", value: 600 },
+    { label: "Custom", value: "custom" },
+  ],
+  refresh_interval: 5,
+  session_refresh_buffer: 30,
+  storage_key: "piholeSession",
+  custom_duration_key: "piholeCustomDuration",
+  controller_version: "1.2.2",
+  fetch_timeout_ms: 10000,
+  github_url: "https://github.com/mikeswanson/PiHoleController",
+};
+
+// ====================================================
+// STATE MANAGEMENT
+// ====================================================
+let state = {
+  sid: null,
+  sidValidity: null,
+  sidCreatedAt: null,
+  blockingStatus: null,
+  timerEndTime: null,
+  countdownInterval: null,
+  autoRefreshInterval: null,
+  sessionCheckInterval: null,
+  csrf: null,
+};
+
+// Helper function to parse boolean parameters strictly
+// Only accepts string values "true" or "false" - anything else returns the default
+function parseStrictBoolean(value, defaultValue) {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return defaultValue;
+}
+
+// Parse URL parameters
+const urlParams = new URLSearchParams(window.location.search);
+const piholeUrl = urlParams.get("url") || "https://pi.hole";
+const apiPassword = urlParams.get("pwd") || "";
+const action = urlParams.get("action"); // 'enable', 'disable', or null
+const duration = urlParams.get("duration")
+  ? parseInt(urlParams.get("duration"))
+  : null;
+const customTitle = urlParams.get("title") || "Pi-hole Controller";
+const showEnableDisable = parseStrictBoolean(
+  urlParams.get("showButtons"),
+  true
+);
+const showPresets = parseStrictBoolean(urlParams.get("showPresets"), true);
+const showTips = parseStrictBoolean(urlParams.get("showTips"), true);
+const showFooter = parseStrictBoolean(urlParams.get("showFooter"), true);
+const customPresets = urlParams.get("presets"); // Custom comma-separated preset times
+
+// Process custom presets if provided
+if (customPresets) {
+  try {
+    const presetItems = customPresets.split(",");
+    const customPresetArray = [];
+
+    presetItems.forEach((item) => {
+      // Parse the preset (format: "label:value")
+      const parts = item.split(":");
+      if (parts.length === 2) {
+        const label = decodeURIComponent(parts[0].trim());
+        const value = parts[1].trim().toLowerCase();
+
+        if (value === "custom") {
+          customPresetArray.push({ label, value: "custom" });
+        } else {
+          // Try to parse as number, converting from minutes if needed
+          let numValue = parseInt(value);
+          if (!isNaN(numValue)) {
+            // Check if value ends with "m" for minutes
+            if (value.endsWith("m")) {
+              numValue *= 60; // Convert to seconds
+            }
+            customPresetArray.push({ label, value: numValue });
+          }
+        }
+      }
+    });
+
+    // Replace default presets if we have valid custom ones
+    if (customPresetArray.length > 0) {
+      CONFIG.preset_durations = customPresetArray;
+    }
+  } catch (e) {
+    console.error("Error parsing custom presets:", e);
+  }
+}
+
+// ====================================================
+// DOM ELEMENTS
+// ====================================================
+const elements = {
+  loginCard: document.getElementById("login-card"),
+  mainCard: document.getElementById("main-card"),
+  loginForm: document.getElementById("login-form"),
+  loginStatus: document.getElementById("login-status"),
+  piholeUrlInput: document.getElementById("pihole-url-input"),
+  passwordInput: document.getElementById("password-input"),
+  statusDisplay: document.getElementById("status-display"),
+  timerDisplay: document.getElementById("timer-display"),
+  enableButton: document.getElementById("enable-button"),
+  disableButton: document.getElementById("disable-button"),
+  presetContainer: document.getElementById("preset-container"),
+  customDurationDiv: document.getElementById("custom-duration"),
+  applyCustomButton: document.getElementById("apply-custom"),
+  apiSettingsLink: document.getElementById("api-settings-link"),
+  adminLink: document.getElementById("admin-link"),
+};
+
+// ====================================================
+// SESSION STORAGE FUNCTIONS
+// ====================================================
+function saveSessionData() {
+  const sessionData = {
+    sid: state.sid,
+    piholeUrl: piholeUrl,
+    sidCreatedAt: state.sidCreatedAt,
+    sidValidity: state.sidValidity,
+    csrf: state.csrf,
+  };
+  try {
+    localStorage.setItem(CONFIG.storage_key, JSON.stringify(sessionData));
+    console.log("Session data saved to localStorage");
+  } catch (e) {
+    console.error("Error saving session to localStorage:", e);
+  }
+}
+
+function loadSessionData() {
+  try {
+    const data = localStorage.getItem(CONFIG.storage_key);
+    if (data) {
+      const sessionData = JSON.parse(data);
+      if (sessionData.piholeUrl === piholeUrl) {
+        state.sid = sessionData.sid;
+        state.sidCreatedAt = sessionData.sidCreatedAt;
+        state.sidValidity = sessionData.sidValidity;
+        state.csrf = sessionData.csrf;
+        console.log("Session data loaded from localStorage");
+        if (isSessionValid()) {
+          return true;
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Error loading session from localStorage:", e);
+  }
+  return false;
+}
+
+function clearSessionData() {
+  try {
+    localStorage.removeItem(CONFIG.storage_key);
+    console.log("Session data cleared from localStorage");
+  } catch (e) {
+    console.error("Error clearing session from localStorage:", e);
+  }
+}
+
+function isSessionValid() {
+  if (!state.sid || !state.sidCreatedAt || !state.sidValidity) return false;
+  const now = Date.now();
+  const expirationTime = state.sidCreatedAt + state.sidValidity * 1000;
+  return now < expirationTime;
+}
+
+function getSessionTimeRemaining() {
+  if (!state.sid || !state.sidCreatedAt || !state.sidValidity) return 0;
+  const now = Date.now();
+  const expirationTime = state.sidCreatedAt + state.sidValidity * 1000;
+  return Math.max(0, Math.floor((expirationTime - now) / 1000));
+}
+
+// ====================================================
+// UI HELPER FUNCTIONS
+// ====================================================
+function showStatus(message, type) {
+  elements.statusDisplay.className = `status ${type}`;
+  elements.statusDisplay.textContent = message;
+}
+
+function showLoginStatus(message, type) {
+  elements.loginStatus.className = `status ${type}`;
+  elements.loginStatus.textContent = message;
+  elements.loginStatus.classList.remove("hidden");
+}
+
+function formatTimeRemaining(totalSeconds) {
+  if (totalSeconds <= 0) return "0s";
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  let timeString = "";
+  if (hours > 0) {
+    timeString += `${hours}h `;
+  }
+  if (hours > 0 || minutes > 0) {
+    timeString += `${minutes}m `;
+  }
+  timeString += `${seconds}s`;
+  return timeString;
+}
+
+// Helper function to handle parameters consistently
+function buildUrlParams(baseParams = {}) {
+  const params = new URLSearchParams();
+
+  // 1. Always put URL and password first (if provided)
+  if (baseParams.url) params.set("url", baseParams.url);
+  if (baseParams.pwd) params.set("pwd", baseParams.pwd);
+
+  // 2. Preserve customization parameters in the middle
+  if (customTitle !== "Pi-hole Controller") params.set("title", customTitle);
+  if (!showEnableDisable) params.set("showButtons", "false");
+  if (!showPresets) params.set("showPresets", "false");
+  if (!showTips) params.set("showTips", "false");
+  if (!showFooter) params.set("showFooter", "false");
+  if (customPresets) params.set("presets", customPresets);
+
+  // 3. Add action-specific parameters last (if provided)
+  if (baseParams.action) params.set("action", baseParams.action);
+  if (baseParams.duration !== undefined && baseParams.duration !== null) {
+    params.set("duration", baseParams.duration);
+  }
+
+  return params;
+}
+
+function generateActionUrl(action, duration = null) {
+  const url = new URL(window.location.href);
+  const params = buildUrlParams({
+    url: piholeUrl,
+    pwd: apiPassword,
+    action: action,
+    duration: duration,
+  });
+
+  url.search = params.toString();
+  return url.toString();
+}
+
+function updateApiSettingsLink() {
+  if (elements.apiSettingsLink) {
+    const baseUrl = elements.piholeUrlInput.value.trim();
+    elements.apiSettingsLink.href = `${baseUrl}/admin/settings/api`;
+  }
+}
+
+function updateAdminLink() {
+  if (elements.adminLink) {
+    const baseUrl = apiPassword
+      ? piholeUrl
+      : elements.piholeUrlInput.value.trim();
+    elements.adminLink.href = `${baseUrl}/admin`;
+  }
+}
+
+// ====================================================
+// API INTERACTION
+// ====================================================
+// Helper: fetch with timeout to avoid indefinite hangs
+async function fetchWithTimeout(
+  url,
+  options = {},
+  timeoutMs = CONFIG.fetch_timeout_ms
+) {
+  const controller = new AbortController();
+  const id = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch (_) {}
+  }, timeoutMs);
+  try {
+    const opts = { ...options, signal: controller.signal };
+    return await fetch(url, opts);
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+// Helper: treat both 401 and 403 as unauthorized for session purposes
+function isUnauthorized(response) {
+  return response && (response.status === 401 || response.status === 403);
+}
+// Helper: Returns true if the controller is hosted on the same origin as the Pi-hole URL
+function isSameOrigin() {
+  try {
+    return new URL(piholeUrl).origin === window.location.origin;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Helper: Returns fetch options with credentials and CSRF token only if same origin
+function getFetchOptions(method, body = null) {
+  const options = {
+    method,
+    headers: {},
+  };
+  if (body) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  if (isSameOrigin()) {
+    options.credentials = "include";
+    if (state.csrf) {
+      options.headers["X-CSRF-Token"] = state.csrf;
+    }
+  }
+  return options;
+}
+
+async function createNewSession() {
+  try {
+    showStatus("Creating new Pi-hole session...", "info");
+    const options = getFetchOptions("POST", { password: apiPassword });
+    const response = await fetchWithTimeout(`${piholeUrl}/api/auth`, options);
+    const data = await response.json();
+    if (response.ok && data.session?.valid) {
+      state.sid = data.session.sid;
+      state.sidValidity = data.session.validity;
+      state.sidCreatedAt = Date.now();
+      state.csrf = data.session.csrf || null;
+      saveSessionData();
+      console.log(
+        `New session created. Valid for ${state.sidValidity} seconds.`
+      );
+      return true;
+    } else {
+      state.sid = null;
+      showStatus(
+        `Authentication failed: ${
+          data.error?.message ||
+          data.session?.message ||
+          "Check your API password"
+        }`,
+        "error"
+      );
+      return false;
+    }
+  } catch (error) {
+    state.sid = null;
+    const isAbort = error && error.name === "AbortError";
+    const msg = isAbort
+      ? "Request timed out. Check connectivity."
+      : `Connection error: ${error.message}. Check your Pi-hole URL.`;
+    showStatus(msg, "error");
+    return false;
+  }
+}
+
+async function authenticateSession() {
+  // Try loading from local storage
+  if (!state.sid) {
+    loadSessionData();
+  }
+  // Check if it is valid
+  if (state.sid) {
+    try {
+      const options = getFetchOptions("GET");
+      const response = await fetchWithTimeout(
+        `${piholeUrl}/api/dns/blocking?sid=${encodeURIComponent(state.sid)}`,
+        options
+      );
+      if (response.ok) {
+        return true;
+      } else {
+        if (isUnauthorized(response)) {
+          console.log("Session expired or invalid (auth check)");
+          state.sid = null;
+          clearSessionData();
+        } else {
+          console.warn("Non-OK during auth check:", response.status);
+          // Clear session on other non-OK statuses to recover from stale SIDs
+          state.sid = null;
+          clearSessionData();
+        }
+      }
+    } catch (error) {
+      console.error("Error verifying session:", error);
+      // Clear stale session on network errors/timeouts
+      state.sid = null;
+      clearSessionData();
+    }
+  }
+  // If we don't have a valid session, create a new one
+  if (!state.sid) {
+    return await createNewSession();
+  }
+  return false;
+}
+
+async function logoutSession() {
+  if (!state.sid) {
+    clearSessionData();
+    return true;
+  }
+  try {
+    const options = getFetchOptions("DELETE");
+    const response = await fetchWithTimeout(
+      `${piholeUrl}/api/auth?sid=${encodeURIComponent(state.sid)}`,
+      options
+    );
+    const success = response.status === 410;
+    if (success) {
+      console.log("Successfully logged out of Pi-hole session");
+    } else {
+      console.warn("Pi-hole logout may have failed, status:", response.status);
+    }
+    state.sid = null;
+    clearSessionData();
+    return true;
+  } catch (error) {
+    console.error("Error during Pi-hole logout:", error);
+    state.sid = null;
+    clearSessionData();
+    return false;
+  }
+}
+
+async function checkBlockingStatus() {
+  if (!isSessionValid()) {
+    const authSuccess = await authenticateSession();
+    if (!authSuccess) return;
+  }
+  try {
+    const options = getFetchOptions("GET");
+    const response = await fetchWithTimeout(
+      `${piholeUrl}/api/dns/blocking?sid=${encodeURIComponent(state.sid)}`,
+      options
+    );
+    if (isUnauthorized(response)) {
+      console.log("Session expired during status check");
+      state.sid = null;
+      clearSessionData();
+      const authSuccess = await authenticateSession();
+      if (!authSuccess) return;
+      return checkBlockingStatus();
+    }
+    const data = await response.json();
+    if (response.ok) {
+      if (state.sidCreatedAt) {
+        state.sidCreatedAt = Date.now();
+        saveSessionData();
+      }
+      state.blockingStatus =
+        data.blocking === true || data.blocking === "enabled";
+      updateBlockingStatusDisplay(state.blockingStatus, data.timer);
+      // Timer
+      if (data.timer) {
+        startCountdown(data.timer);
+      } else {
+        stopCountdown();
+        elements.timerDisplay.textContent = "";
+      }
+    } else {
+      showStatus(`Error: ${data.error?.message || "Unknown error"}`, "error");
+    }
+  } catch (error) {
+    showStatus(`Network error: ${error.message}`, "error");
+  }
+}
+
+function updateBlockingStatusDisplay(isEnabled, timer) {
+  if (isEnabled) {
+    showStatus("Pi-hole blocking is ENABLED", "success");
+    elements.enableButton.disabled = true;
+    elements.disableButton.disabled = false;
+  } else {
+    showStatus("Pi-hole blocking is DISABLED", "warning");
+    elements.enableButton.disabled = false;
+    elements.disableButton.disabled = true;
+  }
+  if (timer) {
+    const statusPrefix = isEnabled ? "Blocking enabled" : "Blocking disabled";
+    elements.statusDisplay.textContent = `${statusPrefix} (Timer active)`;
+  }
+}
+
+async function executeAction() {
+  if (!isSessionValid()) {
+    const authSuccess = await authenticateSession();
+    if (!authSuccess) return;
+  }
+  try {
+    elements.enableButton.disabled = true;
+    elements.disableButton.disabled = true;
+    const blocking = action === "enable";
+    const payload = { blocking };
+    if (duration > 0 && action === "disable") {
+      payload.timer = duration;
+    }
+    const options = getFetchOptions("POST", payload);
+    const response = await fetchWithTimeout(
+      `${piholeUrl}/api/dns/blocking?sid=${encodeURIComponent(state.sid)}`,
+      options
+    );
+    if (isUnauthorized(response)) {
+      console.log("Session expired during action execution");
+      state.sid = null;
+      clearSessionData();
+      const authSuccess = await authenticateSession();
+      if (!authSuccess) {
+        elements.enableButton.disabled = false;
+        elements.disableButton.disabled = false;
+        return;
+      }
+      return executeAction();
+    }
+    const data = await response.json();
+    if (!response.ok) {
+      showStatus(`Error: ${data.error?.message || "Unknown error"}`, "error");
+    } else {
+      if (data.session?.sid) {
+        state.sid = data.session.sid;
+        state.csrf = data.session.csrf || null;
+        state.sidValidity = data.session.validity;
+        state.sidCreatedAt = Date.now();
+        saveSessionData();
+      } else {
+        state.sidCreatedAt = Date.now();
+        saveSessionData();
+      }
+      if (action === "enable") {
+        showStatus("Pi-hole blocking has been ENABLED", "success");
+      } else if (action === "disable") {
+        const durationMsg = duration
+          ? ` for ${formatTimeRemaining(duration)}`
+          : "";
+        showStatus(
+          `Pi-hole blocking has been DISABLED${durationMsg}`,
+          "warning"
+        );
+      }
+    }
+    await checkBlockingStatus();
+  } catch (error) {
+    showStatus(`Network error: ${error.message}`, "error");
+  } finally {
+    if (elements.enableButton && elements.disableButton) {
+      elements.enableButton.disabled = state.blockingStatus;
+      elements.disableButton.disabled = !state.blockingStatus;
+    }
+  }
+}
+
+function setBlockingStatus(blocking, timer = null) {
+  const actionUrl = generateActionUrl(blocking ? "enable" : "disable", timer);
+  window.location.href = actionUrl;
+}
+
+// ====================================================
+// TIMER FUNCTIONS
+// ====================================================
+function startCountdown(seconds) {
+  stopCountdown();
+  state.timerEndTime = Date.now() + seconds * 1000;
+  updateTimerDisplay();
+  state.countdownInterval = setInterval(updateTimerDisplay, 1000);
+}
+
+function updateTimerDisplay() {
+  const now = Date.now();
+  const timeRemaining = Math.max(
+    0,
+    Math.floor((state.timerEndTime - now) / 1000)
+  );
+  if (timeRemaining <= 0) {
+    elements.timerDisplay.textContent = "";
+    stopCountdown();
+    checkBlockingStatus();
+  } else {
+    const formattedTime = formatTimeRemaining(timeRemaining);
+    const statusText = state.blockingStatus
+      ? `Blocking will be disabled in: ${formattedTime}`
+      : `Blocking will be enabled in: ${formattedTime}`;
+    elements.timerDisplay.textContent = statusText;
+  }
+}
+
+function stopCountdown() {
+  if (state.countdownInterval) {
+    clearInterval(state.countdownInterval);
+    state.countdownInterval = null;
+  }
+}
+
+function checkSessionExpiration() {
+  if (state.sid && !isSessionValid()) {
+    console.log("Session expired during periodic check");
+    if (!elements.mainCard.classList.contains("hidden")) {
+      authenticateSession();
+    }
+  }
+}
+
+// ====================================================
+// UI INITIALIZATION
+// ====================================================
+function setupPresetButtons() {
+  elements.presetContainer.innerHTML = "";
+  CONFIG.preset_durations.forEach((preset) => {
+    const button = document.createElement("button");
+    button.textContent = preset.label;
+    button.className = "preset-button";
+    button.dataset.value = preset.value;
+    button.addEventListener("click", () => {
+      if (preset.value === "custom") {
+        elements.customDurationDiv.style.display = "block";
+        loadCustomDurationSettings();
+      } else {
+        setBlockingStatus(false, preset.value);
+      }
+    });
+    button.style.backgroundColor = "#f7a145";
+    button.style.color = "white";
+    elements.presetContainer.appendChild(button);
+  });
+}
+
+// ====================================================
+// INITIALIZATION
+// ====================================================
+async function initialize() {
+  // Set custom title if provided
+  document.title = customTitle;
+
+  // Update headings in both cards
+  const titleElements = document.querySelectorAll("h1");
+  titleElements.forEach((el) => {
+    el.textContent = customTitle;
+  });
+
+  // Show/hide tips
+  if (!showTips) {
+    const tipElements = document.querySelectorAll(".help-text");
+    tipElements.forEach((el) => (el.style.display = "none"));
+  }
+
+  // Show/hide footer
+  if (!showFooter) {
+    const footer = document.querySelector(".footer");
+    if (footer) footer.style.display = "none";
+  }
+
+  if (apiPassword) {
+    elements.loginCard.classList.add("hidden");
+    elements.mainCard.classList.remove("hidden");
+
+    // Apply UI customization options
+    if (!showEnableDisable && elements.enableButton && elements.disableButton) {
+      const buttonRow = elements.enableButton.closest(".button-row");
+      if (buttonRow) buttonRow.style.display = "none";
+    }
+
+    // Show/hide preset buttons
+    if (!showPresets) {
+      if (elements.presetContainer)
+        elements.presetContainer.style.display = "none";
+      if (elements.customDurationDiv)
+        elements.customDurationDiv.style.display = "none";
+    }
+
+    // Setup preset buttons
+    setupPresetButtons();
+
+    updateAdminLink();
+    await authenticateSession();
+    await checkBlockingStatus();
+    if (action) {
+      await executeAction();
+    }
+    if (CONFIG.refresh_interval > 0) {
+      state.autoRefreshInterval = setInterval(
+        checkBlockingStatus,
+        CONFIG.refresh_interval * 1000
+      );
+    }
+    state.sessionCheckInterval = setInterval(checkSessionExpiration, 10000);
+  } else {
+    // No password in URL GåÆ show login card
+    // Also log out to clear any prior session
+    logoutSession();
+    elements.loginCard.classList.remove("hidden");
+    elements.mainCard.classList.add("hidden");
+    elements.piholeUrlInput.value = piholeUrl;
+    updateAdminLink();
+  }
+}
+
+function updateVersionDisplay() {
+  const versionElement = document.getElementById("controller-version");
+  if (versionElement) {
+    versionElement.innerHTML = `<a href="${CONFIG.github_url}" target="_blank">Pi-hole Controller ${CONFIG.controller_version}</a>`;
+  }
+}
+
+// ====================================================
+// EVENT LISTENERS
+// ====================================================
+elements.loginForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const enteredUrl = elements.piholeUrlInput.value.trim();
+  const enteredPassword = elements.passwordInput.value;
+
+  const redirectUrl = new URL(window.location.href);
+  const params = buildUrlParams({
+    url: enteredUrl,
+    pwd: enteredPassword,
+  });
+
+  redirectUrl.search = params.toString();
+  window.location.href = redirectUrl.toString();
+});
+
+elements.piholeUrlInput.addEventListener("input", updateApiSettingsLink);
+elements.piholeUrlInput.addEventListener("input", updateAdminLink);
+
+elements.enableButton.addEventListener("click", () => {
+  setBlockingStatus(true);
+});
+elements.disableButton.addEventListener("click", () => {
+  setBlockingStatus(false);
+});
+
+const customDurationValue = document.getElementById("custom-duration-value");
+const toggleSeconds = document.getElementById("toggle-seconds");
+const toggleMinutes = document.getElementById("toggle-minutes");
+let customDurationUnit = "seconds";
+
+function loadCustomDurationSettings() {
+  try {
+    const savedSettings = localStorage.getItem(CONFIG.custom_duration_key);
+    if (savedSettings) {
+      const settings = JSON.parse(savedSettings);
+      if (settings.value && !isNaN(settings.value)) {
+        customDurationValue.value = settings.value;
+      }
+      if (settings.unit === "minutes") {
+        toggleMinutes.click();
+      }
+      console.log("Custom duration settings loaded from localStorage");
+    }
+  } catch (e) {
+    console.error("Error loading custom duration settings:", e);
+  }
+}
+
+function saveCustomDurationSettings() {
+  try {
+    const settings = {
+      value: customDurationValue.value,
+      unit: customDurationUnit,
+    };
+    localStorage.setItem(CONFIG.custom_duration_key, JSON.stringify(settings));
+    console.log("Custom duration settings saved to localStorage");
+  } catch (e) {
+    console.error("Error saving custom duration settings:", e);
+  }
+}
+
+toggleSeconds.addEventListener("click", () => {
+  toggleSeconds.classList.add("active");
+  toggleSeconds.style.backgroundColor = "#4CAF50";
+  toggleMinutes.classList.remove("active");
+  toggleMinutes.style.backgroundColor = "#ccc";
+  customDurationUnit = "seconds";
+  saveCustomDurationSettings();
+});
+toggleMinutes.addEventListener("click", () => {
+  toggleMinutes.classList.add("active");
+  toggleMinutes.style.backgroundColor = "#4CAF50";
+  toggleSeconds.classList.remove("active");
+  toggleSeconds.style.backgroundColor = "#ccc";
+  customDurationUnit = "minutes";
+  saveCustomDurationSettings();
+});
+customDurationValue.addEventListener("change", saveCustomDurationSettings);
+
+elements.applyCustomButton.addEventListener("click", () => {
+  let dur = parseInt(customDurationValue.value);
+  if (isNaN(dur) || dur <= 0) {
+    alert("Please enter a valid positive number");
+    return;
+  }
+  if (customDurationUnit === "minutes") {
+    dur *= 60;
+  }
+  setBlockingStatus(false, dur);
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+  elements.piholeUrlInput.value = piholeUrl;
+  updateApiSettingsLink();
+  updateAdminLink();
+  updateVersionDisplay();
+  initialize();
+});
