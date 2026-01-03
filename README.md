@@ -31,6 +31,16 @@ The Pi-hole Controller provides a simple web interface for:
 
 You can download the HTML and JavaScript files directly from GitHub without needing Git installed. Curl is installed by default on Windows 10/11, macOS, and most Linux distributions.
 
+## Quick Install (Pi-hole 6+)
+
+If you are already SSH'ed into your Pi-hole, you can install or update everything with a single command. The script checks that you are running Pi-hole 6 or later.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mikeswanson/PiHoleController/main/install.sh | sudo bash
+```
+
+To update later, rerun the same command.
+
 ### Using curl (all platforms)
 
 ```bash
