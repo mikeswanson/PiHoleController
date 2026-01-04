@@ -12,55 +12,24 @@ The Pi-hole Controller provides a simple web interface for:
 - **Temporary Disabling:** Disable blocking for a set duration. The controller will show a countdown timer until the blocking state is automatically restored.
 - **Bookmarkable Shortcuts:** Once an action is triggered, you can bookmark or copy the URL to quickly repeat the action later.
 
-## Common Usage Concepts
+**Pi-hole App Password:** To interact with the Pi-hole API, you must generate an app password:
 
-- **Pi-hole App Password:** To interact with the Pi-hole API, you must generate an app password:
+- Open your Pi-hole Admin Interface.
+- Navigate to **Settings → Web interface / API**.
+- Switch from **Basic** to **Expert** mode.
+- Click **Configure app password** and copy the generated password.
 
-  - Open your Pi-hole Admin Interface.
-  - Navigate to **Settings → Web interface / API**.
-  - Switch from **Basic** to **Expert** mode.
-  - Click **Configure app password** and copy the generated password.
+**Controller URL:** The controller builds URLs that include your Pi-hole URL, app password, and the desired action (enable/disable).
 
-- **Controller URL:** The controller builds URLs that include your Pi-hole URL, app password, and the desired action (enable/disable).
+> **Security Note:** Including your app password directly in the URL can expose it if the URL is logged or shared. Make sure to safeguard this information and only share the URL with trusted parties.
 
-  > **Security Note:** Including your app password directly in the URL can expose it if the URL is logged or shared. Make sure to safeguard this information and only share the URL with trusted parties.
+**Timer Functionality:** When disabling blocking temporarily, you can select a preset duration or set a custom time. A visible countdown timer shows how long until blocking is re-enabled.
 
-- **Timer Functionality:** When disabling blocking temporarily, you can select a preset duration or set a custom time. A visible countdown timer shows how long until blocking is re-enabled.
+## Quick Install
 
-## Downloading the Controller
+SSH into your Pi-hole and install or update everything with a single command. Elevated permissions are required by the install script because it writes into `/var/www/html` and changes file permissions.
 
-You can download the HTML and JavaScript files directly from GitHub without needing Git installed. Curl is installed by default on Windows 10/11, macOS, and most Linux distributions.
-
-## Quick Install (Pi-hole 6+)
-
-If you are already SSH'ed into your Pi-hole, you can install or update everything with a single command. The script checks that you are running Pi-hole 6 or later.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/mikeswanson/PiHoleController/main/install.sh | sudo bash
-```
-
-To update later, rerun the same command.
-
-### Using curl (all platforms)
-
-```bash
-curl -o controller.html https://raw.githubusercontent.com/mikeswanson/PiHoleController/main/controller.html
-curl -o controller.js https://raw.githubusercontent.com/mikeswanson/PiHoleController/main/controller.js
-```
-
-## Installing on Your Pi-hole
-
-Follow these steps to install or update the controller on your Pi-hole:
-
-1. Transfer the files to your Pi-hole:
-
-   ```bash
-   scp controller.html controller.js pi@pi.hole:~
-   ```
-
-   _(Enter the Pi-hole password when prompted)_
-
-2. SSH into your Pi-hole:
+1. SSH into your Pi-hole:
 
    ```bash
    ssh pi@pi.hole
@@ -68,7 +37,48 @@ Follow these steps to install or update the controller on your Pi-hole:
 
    _(Enter the Pi-hole password when prompted)_
 
-3. Move the files to the web server directory:
+2. Run the install script:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/mikeswanson/PiHoleController/main/install.sh | sudo bash
+   ```
+
+3. Exit the SSH session:
+
+   ```bash
+   exit
+   ```
+
+To update later, rerun the same command.
+
+## Manual Install
+
+To install or update the controller manually:
+
+1. Download the files to a local folder:
+
+   ```bash
+   curl -o controller.html https://raw.githubusercontent.com/mikeswanson/PiHoleController/main/controller.html
+   curl -o controller.js https://raw.githubusercontent.com/mikeswanson/PiHoleController/main/controller.js
+   ```
+
+2. Transfer the files to your Pi-hole:
+
+   ```bash
+   scp controller.html controller.js pi@pi.hole:~
+   ```
+
+   _(Enter the Pi-hole password when prompted)_
+
+3. SSH into your Pi-hole:
+
+   ```bash
+   ssh pi@pi.hole
+   ```
+
+   _(Enter the Pi-hole password when prompted)_
+
+4. Move the files to the web server directory:
 
    ```bash
    sudo mv ~/controller.html ~/controller.js /var/www/html
@@ -78,17 +88,17 @@ Follow these steps to install or update the controller on your Pi-hole:
 
    _Keep `controller.html` and `controller.js` in the same directory._
 
-4. Exit the SSH session:
+5. Exit the SSH session:
 
    ```bash
    exit
    ```
 
-5. From the Pi-hole Admin Interface, navigate to **Settings → All settings → Webserver and API → webserver.serve_all** and set it to **Enabled**.
+### Enable Web Serving
+
+From the Pi-hole Admin Interface, navigate to **Settings → All settings → Webserver and API → webserver.serve_all** and set it to **Enabled**.
 
 Now, you can access the controller by navigating to `https://pi.hole/controller.html` (or the appropriate hostname/IP) in your web browser.
-
-> **CSP Note:** Pi-hole 6 tightened Content Security Policy defaults to block inline scripts. This project uses an external JavaScript file so it works with the default Pi-hole CSP without asking users to change server settings.
 
 ## Usage
 

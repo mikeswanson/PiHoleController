@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_RAW_BASE="https://raw.githubusercontent.com/mikeswanson/PiHoleController/installer"
+REPO_RAW_BASE="https://raw.githubusercontent.com/mikeswanson/PiHoleController/main"
 TARGET_DIR="/var/www/html"
 
 if [ "${EUID}" -ne 0 ]; then
