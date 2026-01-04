@@ -94,7 +94,7 @@ To install or update the controller manually:
    exit
    ```
 
-### Enable Web Serving
+## Enable Web Serving
 
 From the Pi-hole Admin Interface, navigate to **Settings → All settings → Webserver and API → webserver.serve_all** and set it to **Enabled**.
 
